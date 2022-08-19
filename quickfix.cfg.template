@@ -1,0 +1,13 @@
+[DEFAULT]
+SocketConnectHost=fix.exchange.coinbase.com
+SocketConnectPort=4198
+HeartBtInt=30
+SenderCompID=<COINBASE-KEY>
+TargetCompID=Coinbase
+ResetOnLogon=Y
+FileLogPath=logs
+SocketUseSSL=Y
+
+[SESSION]
+BeginString=FIX.4.2
+
