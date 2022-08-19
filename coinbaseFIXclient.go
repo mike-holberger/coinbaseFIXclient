@@ -14,10 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/quickfixgo/enum"
-	"github.com/quickfixgo/field"
-	fix42neworderlist "github.com/quickfixgo/fix42/neworderlist"
-	fix42nos "github.com/quickfixgo/fix42/newordersingle"
+	"coinbaseFIXclient/internal/enum"
+	"coinbaseFIXclient/internal/field"
+	fix42neworderlist "coinbaseFIXclient/internal/fix42/neworderlist"
+	fix42nos "coinbaseFIXclient/internal/fix42/newordersingle"
+
 	"github.com/quickfixgo/quickfix"
 	"github.com/rs/zerolog/log"
 )
@@ -71,7 +72,7 @@ func (e CoinbaseFIXclient) OnLogout(sessionID quickfix.SessionID) {
 
 // FromAdmin implemented as part of Application interface
 func (e CoinbaseFIXclient) FromAdmin(msg *quickfix.Message, sessionID quickfix.SessionID) (reject quickfix.MessageRejectError) {
-	msgType, err := msg.MsgType()
+	msgType, err := msg.Header.GetString(35)
 	if err != nil {
 		log.Error().Err(err).Msg("ToApp msg.MsgType()")
 	} else if t, ok := messageDict[msgType]; ok {
@@ -119,7 +120,7 @@ func (e CoinbaseFIXclient) ToAdmin(msg *quickfix.Message, sessionID quickfix.Ses
 		msg.Body.SetString(96, rawData)
 	}
 
-	msgType, err := msg.MsgType()
+	msgType, err := msg.Header.GetString(35)
 	if err != nil {
 		log.Error().Err(err).Msg("ToApp msg.MsgType()")
 	} else if t, ok := messageDict[msgType]; ok {
@@ -131,7 +132,7 @@ func (e CoinbaseFIXclient) ToAdmin(msg *quickfix.Message, sessionID quickfix.Ses
 
 // ToApp implemented as part of Application interface
 func (e CoinbaseFIXclient) ToApp(msg *quickfix.Message, sessionID quickfix.SessionID) (err error) {
-	msgType, err := msg.MsgType()
+	msgType, err := msg.Header.GetString(35)
 	if err != nil {
 		log.Error().Err(err).Msg("ToApp msg.MsgType()")
 	} else if t, ok := messageDict[msgType]; ok {
@@ -164,10 +165,10 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 		e.execReports.mu.Unlock()
 	}
 
-	msgType, err := msg.MsgType()
+	msgType, err := msg.Header.GetString(35)
 	if err != nil {
 		log.Error().Err(err).Msg("FromApp msg.MsgType()")
-	} else if t, ok := messageDict[msgType]; ok {
+	} else if t, ok := messageDict[string(msgType)]; ok {
 		msgType = t
 	}
 
@@ -232,28 +233,42 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 		return
 	}
 
-	orderSide := order.Side.getQFenum()
-	ordtype := order.OrderType.getQFenum()
+	var side enum.Side
+	switch order.Side {
+	case Side_BUY:
+		side = enum.Side_BUY
+	case Side_SELL:
+		side = enum.Side_SELL
+	}
+
+	var ty enum.OrdType
+	switch order.OrderType {
+	case OrdType_MARKET:
+		ty = enum.OrdType_MARKET
+	case OrdType_LIMIT:
+		ty = enum.OrdType_LIMIT
+	case OrdType_STOP_LIMIT:
+		ty = enum.OrdType_STOP_LIMIT
+	}
 
 	nos := fix42nos.New(
 		field.NewClOrdID(order.ClientID),
-		field.NewHandlInst(enum.HandlInst_MANUAL_ORDER_BEST_EXECUTION),
 		field.NewSymbol(strings.ToUpper(order.Symbol)),
-		field.NewSide(orderSide),
+		field.NewSide(side),
 		field.NewTransactTime(time.Now().UTC()),
-		field.NewOrdType(ordtype),
+		field.NewOrdType(ty),
 	)
 
 	// Set price and Qty
 	switch {
-	case order.OrderType == OrderType_MARKET && order.CashOrderQty != "":
+	case order.OrderType == OrdType_MARKET && order.CashOrderQty != "":
 		nos.SetString(152, order.CashOrderQty)
-	case order.OrderType == OrderType_MARKET && order.CashOrderQty == "":
+	case order.OrderType == OrdType_MARKET && order.CashOrderQty == "":
 		nos.SetString(38, order.Qty)
-	case order.OrderType == OrderType_LIMIT:
+	case order.OrderType == OrdType_LIMIT:
 		nos.SetString(44, order.Price)
 		nos.SetString(38, order.Qty)
-	case order.OrderType == OrderType_STOP:
+	case order.OrderType == OrdType(OrdType_STOP_LIMIT):
 		nos.SetString(99, order.Price)
 		nos.SetString(38, order.Qty)
 	}
@@ -321,22 +336,28 @@ func (e CoinbaseFIXclient) ModifyOrder() (err error) {
 	return
 }
 
-func (e CoinbaseFIXclient) NewOrdersBatch(orders []CoinbaseOrderFIX) (err error) {
-	listID := field.ListIDField{}
-	bidType := field.BidTypeField{}
-	totnoOrds := field.TotNoOrdersField{}
+func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrderFIX) (err error) {
+	nol := fix42neworderlist.New(field.ListIDField{}, field.BidTypeField{}, field.TotNoOrdersField{})
 
-	nol := fix42neworderlist.New(listID, bidType, totnoOrds)
+	nol.SetString(35, "U6")
+	nol.SetString(8014, batchID)
+	nol.SetString(73, fmt.Sprintf("%d", len(orders)))
 
-	var group fix42neworderlist.NoOrdersRepeatingGroup
+	// orderSide := order.Side.getQFenum()
+
+	group := fix42neworderlist.NewNoOrdersRepeatingGroup()
 
 	for _, ord := range orders {
 		g := group.Add()
 		g.Set(field.NewClOrdID(ord.ClientID))
-
-		nol.SetGroup(group)
+		g.SetString(55, strings.ToUpper(ord.Symbol))
+		g.SetString(54, string(ord.Side))
+		g.Set(field.NewOrdType(enum.OrdType_LIMIT))
+		g.SetString(44, ord.Price)
+		g.SetString(38, ord.Qty)
 	}
 
+	nol.SetGroup(group)
 	///
 
 	msg := nol.ToMessage()
@@ -394,15 +415,15 @@ type CoinbaseOrderFIX struct {
 	// Example: "ETH-USD"
 	Symbol string
 	// Enum: OrderSide_BUY or OrderSide_SELL
-	Side OrderSide
+	Side Side
 	// Enum: OrderType_MARKET, OrderType_LIMIT, or OrderType_STOP
-	OrderType OrderType
+	OrderType OrdType
 	Price     string
 	Qty       string
 	// Order size in quote units (e.g., USD) (Market order only)
 	CashOrderQty string
 	// OPTIONAL Enum: OrderTimeInForce_GOOD_TILL_CANCEL (default), OrderTimeInForce_IMMEDIATE_OR_CANCEL, OrderTimeInForce_FILL_OR_KILL, or OrderTimeInForce_POST_ONLY
-	TimeInForce OrderTimeInForce
+	TimeInForce enum.TimeInForce
 	// OPTIONAL Enum: OrderTimeInForce_DECREMENT_AND_CANCEL (default), OrderTimeInForce_CANCEL_RESTING, OrderTimeInForce_CANCEL_INCOMING, or OrderTimeInForce_CANCEL_BOTH
-	SelfTradePrevention OrderSelfTradePrevention
+	SelfTradePrevention enum.SelfTradePrevention
 }
