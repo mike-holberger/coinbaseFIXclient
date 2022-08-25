@@ -448,7 +448,6 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 
 		// Batch rejected - collect reject report and remove execReport channels
 		case rejct := <-batchRejectChan:
-			println("!!!!!!!")
 			e.execReports.mu.Lock()
 		REJECT_ORDERS:
 			for _, ord := range orders {
