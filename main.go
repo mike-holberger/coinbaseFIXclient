@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -37,8 +38,8 @@ func main() {
 
 	time.Sleep(3 * time.Second)
 
-	// ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	// defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	// execReport, err := cbFIXclient.NewOrderSingle(CoinbaseOrderFIX{
 	// 	ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
@@ -54,7 +55,7 @@ func main() {
 	// 	log.Info().Interface("ExecReport", execReport).Send()
 	// }
 
-	err = cbFIXclient.NewOrdersBatch("BATCHTEST", []CoinbaseOrderFIX{
+	execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseOrderFIX{
 		{
 			ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
 			Symbol:    "ETH-USD",
@@ -69,12 +70,22 @@ func main() {
 			Side:      Side_BUY,
 			OrderType: OrdType_LIMIT,
 			Price:     "1600",
-			Qty:       "0.02",
+			Qty:       "0.06",
 		},
-	})
+	}, true, ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("NewOrdersBatch Error")
+	} else {
+		log.Info().Interface("ExecReports", execReports).Send()
 	}
+
+	time.Sleep(4 * time.Second)
+
+	// err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
+	// 	ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
+	// 	Symbol:   "ETH-USD",
+	// 	Side:     Side_BUY,
+	// })
 
 	time.Sleep(10 * time.Second)
 

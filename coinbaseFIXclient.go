@@ -16,9 +16,12 @@ import (
 
 	"coinbaseFIXclient/internal/enum"
 	"coinbaseFIXclient/internal/field"
+	fix42neworderbatch "coinbaseFIXclient/internal/fix42/neworderbatch"
 	fix42neworderlist "coinbaseFIXclient/internal/fix42/neworderlist"
 	fix42nos "coinbaseFIXclient/internal/fix42/newordersingle"
+	fix42ordercancel "coinbaseFIXclient/internal/fix42/ordercancelrequest"
 
+	"github.com/google/uuid"
 	"github.com/quickfixgo/quickfix"
 	"github.com/rs/zerolog/log"
 )
@@ -30,13 +33,6 @@ const (
 
 	cfgFileName = "quickfix.cfg"
 )
-
-var messageDict = map[string]string{
-	"A": "Logon",
-	"D": "Order-Single",
-	"8": "ExecReport",
-	"5": "Logout",
-}
 
 // CoinbaseFIXclient implements the quickfix.Application interface
 type CoinbaseFIXclient struct {
@@ -53,11 +49,12 @@ type execReportCallbacks struct {
 type execReportChan struct {
 	clientID   string
 	callbackCh chan ExecutionReport
+	rejectChan chan BatchRejectReport
 }
 
 // OnCreate implemented as part of Application interface
 func (e CoinbaseFIXclient) OnCreate(sessionID quickfix.SessionID) {
-	log.Info().Interface("OnCreate", sessionID).Send()
+	log.Debug().Interface("OnCreate", sessionID).Send()
 }
 
 // OnLogon implemented as part of Application interface
@@ -75,18 +72,21 @@ func (e CoinbaseFIXclient) FromAdmin(msg *quickfix.Message, sessionID quickfix.S
 	msgType, err := msg.Header.GetString(35)
 	if err != nil {
 		log.Error().Err(err).Msg("ToApp msg.MsgType()")
-	} else if t, ok := messageDict[msgType]; ok {
-		msgType = t
 	}
-	log.Info().Str("MsgType", msgType).Str("FromAdmin", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
+	log.Debug().Str("MsgType", getMsgType(msgType)).Str("FromAdmin", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 
 	return nil
 }
 
 // ToAdmin implemented as part of Application interface
 func (e CoinbaseFIXclient) ToAdmin(msg *quickfix.Message, sessionID quickfix.SessionID) {
+	msgType, err := msg.Header.GetString(35)
+	if err != nil {
+		log.Error().Err(err).Msg("ToApp msg.MsgType()")
+	}
+
 	// Custom Fields for Logon Msg
-	if msg.IsMsgTypeOf("A") {
+	if msgType == "A" {
 		// 98	EncryptMethod	Must be 0 (None)
 		msg.Body.SetInt(98, 0)
 		// 108	HeartBtInt	Must be 30 (seconds)
@@ -120,14 +120,7 @@ func (e CoinbaseFIXclient) ToAdmin(msg *quickfix.Message, sessionID quickfix.Ses
 		msg.Body.SetString(96, rawData)
 	}
 
-	msgType, err := msg.Header.GetString(35)
-	if err != nil {
-		log.Error().Err(err).Msg("ToApp msg.MsgType()")
-	} else if t, ok := messageDict[msgType]; ok {
-		msgType = t
-	}
-
-	log.Info().Str("MsgType", msgType).Str("ToAdmin", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
+	log.Debug().Str("MsgType", getMsgType(msgType)).Str("ToAdmin", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 }
 
 // ToApp implemented as part of Application interface
@@ -135,44 +128,65 @@ func (e CoinbaseFIXclient) ToApp(msg *quickfix.Message, sessionID quickfix.Sessi
 	msgType, err := msg.Header.GetString(35)
 	if err != nil {
 		log.Error().Err(err).Msg("ToApp msg.MsgType()")
-	} else if t, ok := messageDict[msgType]; ok {
-		msgType = t
 	}
+	msgType = getMsgType(msgType)
 
-	log.Info().Str("MsgType", msgType).Str("ToApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
+	log.Debug().Str("MsgType", msgType).Str("ToApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 	return
 }
 
 // FromApp implemented as part of Application interface. This is the callback for all Application level messages from the counter party.
 func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.SessionID) (reject quickfix.MessageRejectError) {
 	// Check for Execution Reports to send to response callback chans
-	clientID, err := msg.Body.GetString(11)
-	if msg.IsMsgTypeOf("8") && err == nil {
-		// Look for clientID in callback channels
+	msgType, err := msg.Header.GetString(35)
+	if err != nil {
+		log.Error().Err(err).Msg("ToApp msg.MsgType()")
+	}
+	log.Debug().Str("MsgType", getMsgType(msgType)).Str("FromApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
+
+	switch msgType {
+	case "8":
+		// Single Order Execution Report
+		clientID, _ := msg.Body.GetString(11)
+		if err == nil {
+			// Look for clientID in callback channels
+			e.execReports.mu.Lock()
+			for i, callback := range e.execReports.reportChans {
+				if callback.clientID == clientID {
+					// Unmarshal Execution report and send to chan for that clientID
+					execReport := e.UnmarshalExecReport(msg.String())
+					callback.callbackCh <- execReport
+					close(callback.callbackCh)
+
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					break
+				}
+			}
+			e.execReports.mu.Unlock()
+		}
+	case "U7":
+		// Batch Execution Report
+		batchID, _ := msg.Body.GetString(8014)
+		// Look for batchID in reject channels
 		e.execReports.mu.Lock()
 		for i, callback := range e.execReports.reportChans {
-			if callback.clientID == clientID {
+			if callback.clientID == batchID {
 				// Unmarshal Execution report and send to chan for that clientID
-				execReport := e.UnmarshalExecReport(msg.String())
-				callback.callbackCh <- execReport
-				close(callback.callbackCh)
+				rejectReport := e.UnmarshalBatchRejectReport(msg.String())
+				callback.rejectChan <- rejectReport
+				close(callback.rejectChan)
 
 				// Remove from callback chans
 				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
 			}
 		}
 		e.execReports.mu.Unlock()
 	}
 
-	msgType, err := msg.Header.GetString(35)
-	if err != nil {
-		log.Error().Err(err).Msg("FromApp msg.MsgType()")
-	} else if t, ok := messageDict[string(msgType)]; ok {
-		msgType = t
-	}
-
-	log.Info().Str("MsgType", msgType).Str("FromApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 	return
 }
 
@@ -233,42 +247,26 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 		return
 	}
 
-	var side enum.Side
-	switch order.Side {
-	case Side_BUY:
-		side = enum.Side_BUY
-	case Side_SELL:
-		side = enum.Side_SELL
-	}
-
-	var ty enum.OrdType
-	switch order.OrderType {
-	case OrdType_MARKET:
-		ty = enum.OrdType_MARKET
-	case OrdType_LIMIT:
-		ty = enum.OrdType_LIMIT
-	case OrdType_STOP_LIMIT:
-		ty = enum.OrdType_STOP_LIMIT
-	}
-
 	nos := fix42nos.New(
 		field.NewClOrdID(order.ClientID),
 		field.NewSymbol(strings.ToUpper(order.Symbol)),
-		field.NewSide(side),
+		field.NewSide(enum.Side(order.Side)),
 		field.NewTransactTime(time.Now().UTC()),
-		field.NewOrdType(ty),
+		field.NewOrdType(enum.OrdType(order.OrderType)),
 	)
 
 	// Set price and Qty
-	switch {
-	case order.OrderType == OrdType_MARKET && order.CashOrderQty != "":
-		nos.SetString(152, order.CashOrderQty)
-	case order.OrderType == OrdType_MARKET && order.CashOrderQty == "":
-		nos.SetString(38, order.Qty)
-	case order.OrderType == OrdType_LIMIT:
+	switch order.OrderType {
+	case OrdType_MARKET:
+		if order.CashOrderQty != "" {
+			nos.SetString(152, order.CashOrderQty)
+		} else {
+			nos.SetString(38, order.Qty)
+		}
+	case OrdType_LIMIT:
 		nos.SetString(44, order.Price)
 		nos.SetString(38, order.Qty)
-	case order.OrderType == OrdType(OrdType_STOP_LIMIT):
+	case OrdType_STOP_LIMIT:
 		nos.SetString(99, order.Price)
 		nos.SetString(38, order.Qty)
 	}
@@ -320,9 +318,29 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 	}
 }
 
-func (e CoinbaseFIXclient) OrderCancel() (err error) {
+// Fastest way to cancel an order. Must include ClientID, Symbol, and Side
+func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
+	id := uuid.New().String()
 
+	oc := fix42ordercancel.New(
+		field.NewOrigClOrdID(order.ClientID),
+		field.NewClOrdID(id),
+		field.NewSymbol(order.Symbol),
+		field.NewSide(enum.Side(order.Side)),
+		field.NewTransactTime(time.Now().UTC()),
+	)
+
+	// Finalize and send
+	msg := oc.ToMessage()
+	msg.Header.Set(field.NewSenderCompID(e.key))
+	msg.Header.Set(field.NewTargetCompID(cbtarget))
+
+	//if !waitForExecReport {
+	err = quickfix.Send(msg)
 	return
+	//}
+
+	//return
 }
 
 func (e CoinbaseFIXclient) OrderStatus() (err error) {
@@ -336,14 +354,9 @@ func (e CoinbaseFIXclient) ModifyOrder() (err error) {
 	return
 }
 
-func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrderFIX) (err error) {
-	nol := fix42neworderlist.New(field.ListIDField{}, field.BidTypeField{}, field.TotNoOrdersField{})
-
-	nol.SetString(35, "U6")
-	nol.SetString(8014, batchID)
-	nol.SetString(73, fmt.Sprintf("%d", len(orders)))
-
-	// orderSide := order.Side.getQFenum()
+func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrderFIX, waitForExecReports bool, ctx context.Context) (execReports []ExecutionReport, err error) {
+	nob := fix42neworderbatch.New(field.NewBatchID(batchID))
+	nob.SetString(73, fmt.Sprintf("%d", len(orders)))
 
 	group := fix42neworderlist.NewNoOrdersRepeatingGroup()
 
@@ -357,14 +370,79 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 		g.SetString(38, ord.Qty)
 	}
 
-	nol.SetGroup(group)
+	nob.SetGroup(group)
 	///
 
-	msg := nol.ToMessage()
+	msg := nob.ToMessage()
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	return quickfix.Send(msg)
+	if !waitForExecReports {
+		err = quickfix.Send(msg)
+		return
+	}
+
+	batchRejectChan := make(chan BatchRejectReport)
+	chans := []chan ExecutionReport{}
+
+	// Add batch reject channel
+	e.execReports.mu.Lock()
+	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+		clientID:   batchID,
+		rejectChan: batchRejectChan,
+	})
+
+	// Add order execReport callback channels
+	for _, order := range orders {
+		callbackChan := make(chan ExecutionReport)
+		chans = append(chans, callbackChan)
+
+		e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+			clientID:   order.ClientID,
+			callbackCh: callbackChan,
+		})
+	}
+	e.execReports.mu.Unlock()
+
+	// Send Msg
+	err = quickfix.Send(msg)
+	if err != nil {
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Wait for ExecReports
+	for _, callbackChan := range chans {
+		select {
+		case <-ctx.Done():
+			err = fmt.Errorf("ExecutionReport Callback Timout")
+			return
+		case report := <-callbackChan:
+			execReports = append(execReports, report)
+		case rejct := <-batchRejectChan:
+			// NO EXEC REPORTS, close and remove execReport chans
+			for _, ord := range orders {
+				for i, reportChans := range e.execReports.reportChans {
+					if reportChans.clientID != ord.ClientID {
+						continue
+					}
+					close(reportChans.callbackCh)
+
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				}
+			}
+
+			err = fmt.Errorf(rejct.RejectReason)
+			return
+		}
+	}
+
+	return
 }
 
 func (e CoinbaseFIXclient) OrderCancelBatch() (err error) {
@@ -426,4 +504,23 @@ type CoinbaseOrderFIX struct {
 	TimeInForce enum.TimeInForce
 	// OPTIONAL Enum: OrderTimeInForce_DECREMENT_AND_CANCEL (default), OrderTimeInForce_CANCEL_RESTING, OrderTimeInForce_CANCEL_INCOMING, or OrderTimeInForce_CANCEL_BOTH
 	SelfTradePrevention enum.SelfTradePrevention
+}
+
+func getMsgType(msgType string) string {
+	switch msgType {
+	case "A":
+		return "Logon"
+	case "D":
+		return "Order-Single"
+	case "8":
+		return "ExecReport"
+	case "5":
+		return "Logout"
+	case "U6":
+		return "Orders-Batch"
+	case "U7":
+		return "BatchRejectReport"
+	default:
+		return msgType
+	}
 }

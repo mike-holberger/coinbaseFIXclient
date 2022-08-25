@@ -130,3 +130,27 @@ func (e CoinbaseFIXclient) UnmarshalExecReport(message string) (execReport Execu
 
 	return
 }
+
+type BatchRejectReport struct {
+	// 8014 - BatchID
+	BatchID string
+	// 58 - Text (reason for batch rejection)
+	RejectReason string
+}
+
+func (e CoinbaseFIXclient) UnmarshalBatchRejectReport(message string) (rejectReport BatchRejectReport) {
+	fields := strings.Split(message, "\x01")
+	for _, f := range fields {
+		fieldVal := strings.Split(f, "=")
+		switch fieldVal[0] {
+		case "8014":
+			rejectReport.BatchID = fieldVal[1]
+			continue
+		case "58":
+			rejectReport.RejectReason = fieldVal[1]
+			continue
+		}
+	}
+
+	return
+}
