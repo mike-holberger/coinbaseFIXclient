@@ -49,7 +49,6 @@ type execReportCallbacks struct {
 type execReportChan struct {
 	clientID   string
 	callbackCh chan ExecutionReport
-	rejectChan chan BatchRejectReport
 }
 
 // OnCreate implemented as part of Application interface
@@ -174,9 +173,9 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 		for i, callback := range e.execReports.reportChans {
 			if callback.clientID == batchID {
 				// Unmarshal Execution report and send to chan for that clientID
-				rejectReport := e.UnmarshalBatchRejectReport(msg.String())
-				callback.rejectChan <- rejectReport
-				close(callback.rejectChan)
+				rejectReport := e.UnmarshalExecReport(msg.String())
+				callback.callbackCh <- rejectReport
+				close(callback.callbackCh)
 
 				// Remove from callback chans
 				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
@@ -338,8 +337,10 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 }
 
 // Fastest way to cancel an order. Must include ClientID, Symbol, and Side
-func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX, waitForExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
+func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	cancelID := uuid.New().String()
+
+	println("??????: " + cancelID)
 
 	oc := fix42ordercancel.New(
 		field.NewOrigClOrdID(order.ClientID),
@@ -354,56 +355,56 @@ func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX, waitForExecReport
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	if !waitForExecReport {
-		err = quickfix.Send(msg)
-		return
-	}
-
-	// Create callback channel and Wait for ExecReport
-	callbackChan := make(chan ExecutionReport)
-
-	e.execReports.mu.Lock()
-	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
-		clientID:   cancelID,
-		callbackCh: callbackChan,
-	})
-	e.execReports.mu.Unlock()
-
+	//if !waitForExecReport {
 	err = quickfix.Send(msg)
-	if err != nil {
-		return
-	}
+	return
+	//}
 
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	// // Create callback channel and Wait for ExecReport
+	// callbackChan := make(chan ExecutionReport)
 
-	select {
-	case <-ctx.Done():
-		e.execReports.mu.Lock()
-		for i, reportChans := range e.execReports.reportChans {
-			// Remove ExecReport chan
-			if reportChans.clientID == cancelID {
-				close(reportChans.callbackCh)
+	// e.execReports.mu.Lock()
+	// e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+	// 	clientID:   cancelID,
+	// 	callbackCh: callbackChan,
+	// })
+	// e.execReports.mu.Unlock()
 
-				// Remove from callback chans
-				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
-				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
-				break
-			}
-		}
-		e.execReports.mu.Unlock()
+	// err = quickfix.Send(msg)
+	// if err != nil {
+	// 	return
+	// }
 
-		err = fmt.Errorf("Cancel Order Context Timout")
-		return
-	case execReport = <-callbackChan:
-		if execReport.OrdStatus == "8" {
-			err = fmt.Errorf("Cancel Order Rejected: %s", execReport.Text)
-			return
-		}
+	// if ctx == nil {
+	// 	ctx = context.Background()
+	// }
 
-		return
-	}
+	// select {
+	// case <-ctx.Done():
+	// 	e.execReports.mu.Lock()
+	// 	for i, reportChans := range e.execReports.reportChans {
+	// 		// Remove ExecReport chan
+	// 		if reportChans.clientID == cancelID {
+	// 			close(reportChans.callbackCh)
+
+	// 			// Remove from callback chans
+	// 			e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+	// 			e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+	// 			break
+	// 		}
+	// 	}
+	// 	e.execReports.mu.Unlock()
+
+	// 	err = fmt.Errorf("Cancel Order Context Timout")
+	// 	return
+	// case execReport = <-callbackChan:
+	// 	if execReport.OrdStatus == "8" {
+	// 		err = fmt.Errorf("Cancel Order Rejected: %s", execReport.Text)
+	// 		return
+	// 	}
+
+	// 	return
+	// }
 }
 
 func (e CoinbaseFIXclient) OrderStatus() (err error) {
@@ -444,14 +445,14 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 		return
 	}
 
-	batchRejectChan := make(chan BatchRejectReport)
+	batchRejectChan := make(chan ExecutionReport)
 	chans := []chan ExecutionReport{}
 
 	// Add batch reject channel
 	e.execReports.mu.Lock()
 	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
 		clientID:   batchID,
-		rejectChan: batchRejectChan,
+		callbackCh: batchRejectChan,
 	})
 
 	// Add order execReport callback channels
@@ -511,7 +512,8 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 			}
 			e.execReports.mu.Unlock()
 
-			err = fmt.Errorf(rejct.RejectReason)
+			execReports = append(execReports, rejct)
+			err = fmt.Errorf(rejct.Text)
 			return
 
 		// Batch Context Timeout - close and remove all callback channels
@@ -522,7 +524,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 				for i, reportChans := range e.execReports.reportChans {
 					// Remove reject chan
 					if reportChans.clientID == batchID {
-						close(reportChans.rejectChan)
+						close(reportChans.callbackCh)
 
 						// Remove from callback chans
 						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]

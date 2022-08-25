@@ -47,6 +47,8 @@ type ExecutionReport struct {
 	TradeID string
 	// 1057 - Y for taker orders, N for maker orders
 	AggressorIndicator string
+	// 8014 - BatchID
+	BatchID string
 	// 58 - Text
 	Text string
 }
@@ -122,6 +124,9 @@ func (e CoinbaseFIXclient) UnmarshalExecReport(message string) (execReport Execu
 		case "1057":
 			execReport.AggressorIndicator = fieldVal[1]
 			continue
+		case "8014":
+			execReport.BatchID = fieldVal[1]
+			continue
 		case "58":
 			execReport.Text = fieldVal[1]
 			continue
@@ -131,26 +136,26 @@ func (e CoinbaseFIXclient) UnmarshalExecReport(message string) (execReport Execu
 	return
 }
 
-type BatchRejectReport struct {
-	// 8014 - BatchID
-	BatchID string
-	// 58 - Text (reason for batch rejection)
-	RejectReason string
-}
+// type BatchRejectReport struct {
+// 	// 8014 - BatchID
+// 	BatchID string
+// 	// 58 - Text (reason for batch rejection)
+// 	RejectReason string
+// }
 
-func (e CoinbaseFIXclient) UnmarshalBatchRejectReport(message string) (rejectReport BatchRejectReport) {
-	fields := strings.Split(message, "\x01")
-	for _, f := range fields {
-		fieldVal := strings.Split(f, "=")
-		switch fieldVal[0] {
-		case "8014":
-			rejectReport.BatchID = fieldVal[1]
-			continue
-		case "58":
-			rejectReport.RejectReason = fieldVal[1]
-			continue
-		}
-	}
+// func (e CoinbaseFIXclient) UnmarshalBatchRejectReport(message string) (rejectReport BatchRejectReport) {
+// 	fields := strings.Split(message, "\x01")
+// 	for _, f := range fields {
+// 		fieldVal := strings.Split(f, "=")
+// 		switch fieldVal[0] {
+// 		case "8014":
+// 			rejectReport.BatchID = fieldVal[1]
+// 			continue
+// 		case "58":
+// 			rejectReport.RejectReason = fieldVal[1]
+// 			continue
+// 		}
+// 	}
 
-	return
-}
+// 	return
+// }

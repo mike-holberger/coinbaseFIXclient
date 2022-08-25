@@ -41,61 +41,62 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err := cbFIXclient.NewOrderSingle(CoinbaseOrderFIX{
-		ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
-		Symbol:    "ETH-USD",
-		Side:      Side_BUY,
-		OrderType: OrdType_LIMIT,
-		Price:     "1600",
-		Qty:       "0.08",
-	}, true, ctx)
-	if err != nil {
-		log.Error().Err(err).Msgf("NewOrderSingle Error")
-	} else {
-		log.Info().Interface("ExecReport", execReport).Send()
-	}
-
-	// execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseOrderFIX{
-	// 	{
-	// 		ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
-	// 		Symbol:    "ETH-USD",
-	// 		Side:      Side_BUY,
-	// 		OrderType: OrdType_LIMIT,
-	// 		Price:     "1550",
-	// 		Qty:       "0.02",
-	// 	},
-	// 	{
-	// 		ClientID:  "509e971a-1e70-11ed-861d-0242ac120055",
-	// 		Symbol:    "ETH-USD",
-	// 		Side:      Side_BUY,
-	// 		OrderType: OrdType_LIMIT,
-	// 		Price:     "1600",
-	// 		Qty:       "0.02",
-	// 	},
+	// execReport, err := cbFIXclient.NewOrderSingle(CoinbaseOrderFIX{
+	// 	ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
+	// 	Symbol:    "ETH-USD",
+	// 	Side:      Side_BUY,
+	// 	OrderType: OrdType_LIMIT,
+	// 	Price:     "1600",
+	// 	Qty:       "0.02",
 	// }, true, ctx)
 	// if err != nil {
-	// 	log.Error().Err(err).Msgf("NewOrdersBatch Error")
-	// } //else {
-	// log.Info().Interface("ExecReports", execReports).Send()
-	// //	}
+	// 	log.Error().Err(err).Msgf("NewOrderSingle Error")
+	// } else {
+	// 	log.Info().Interface("ExecReport", execReport).Send()
+	// }
+
+	execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseOrderFIX{
+		{
+			ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
+			Symbol:    "ETH-USD",
+			Side:      Side_BUY,
+			OrderType: OrdType_LIMIT,
+			Price:     "1550",
+			Qty:       "0.02",
+		},
+		{
+			ClientID:  "509e971a-1e70-11ed-861d-0242ac120055",
+			Symbol:    "ETH-USD",
+			Side:      Side_BUY,
+			OrderType: OrdType_LIMIT,
+			Price:     "1600",
+			Qty:       "0.02",
+		},
+	}, true, ctx)
+	if err != nil {
+		log.Error().Err(err).Msgf("NewOrdersBatch Error")
+	} //else {
+	log.Info().Interface("ExecReports", execReports).Send()
+	//	}
 
 	time.Sleep(3 * time.Second)
 
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
+	err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
 		ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
 		Symbol:   "ETH-USD",
 		Side:     Side_BUY,
-	}, true, ctx)
+	}) // , true, ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("Cancel Single Order Error")
-	} else {
-		log.Info().Interface("ExecReport", execReport).Send()
 	}
+	// log.Info().Interface("ExecReport", execReport).Send()
 
 	time.Sleep(6 * time.Second)
 
 	cbFIXclient.Logout()
+
+	println(len(cbFIXclient.execReports.reportChans))
 }
