@@ -158,7 +158,7 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 					callback.callbackCh <- execReport
 					close(callback.callbackCh)
 
-					// Remove from callback chan
+					// Remove from callback chans
 					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 					break
@@ -178,7 +178,7 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 				callback.rejectChan <- rejectReport
 				close(callback.rejectChan)
 
-				// Remove from callback chan
+				// Remove from callback chans
 				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 				break
@@ -317,7 +317,7 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 			if reportChans.clientID == order.ClientID {
 				close(reportChans.callbackCh)
 
-				// Remove from callback chan
+				// Remove from callback chans
 				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 				break
@@ -438,7 +438,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 				if reportChans.clientID == batchID {
 					close(reportChans.rejectChan)
 
-					// Remove from callback chan
+					// Remove from callback chans
 					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 					println("remove " + reportChans.clientID)
@@ -451,7 +451,6 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 
 		// Batch rejected - collect reject report and remove execReport channels
 		case rejct := <-batchRejectChan:
-			// close and remove execReport chans
 			e.execReports.mu.Lock()
 		REJECT_ORDERS:
 			for _, ord := range orders {
@@ -459,7 +458,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 					if reportChans.clientID == ord.ClientID {
 						close(reportChans.callbackCh)
 
-						// Remove from callback chan
+						// Remove from callback chans
 						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 						continue REJECT_ORDERS
@@ -473,7 +472,6 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 
 		// Batch Context Timeout - close and remove all callback channels
 		case <-ctx.Done():
-			// Remove all callback chans
 			e.execReports.mu.Lock()
 		CTX_ORDERS:
 			for _, ord := range orders {
@@ -482,7 +480,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 					if reportChans.clientID == batchID {
 						close(reportChans.rejectChan)
 
-						// Remove from callback chan
+						// Remove from callback chans
 						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 						println("remove " + reportChans.clientID)
@@ -493,7 +491,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 					if reportChans.clientID == ord.ClientID {
 						close(reportChans.callbackCh)
 
-						// Remove from callback chan
+						// Remove from callback chans
 						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 						continue CTX_ORDERS
