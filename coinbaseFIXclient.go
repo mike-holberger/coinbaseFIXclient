@@ -144,7 +144,7 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 	log.Debug().Str("MsgType", getMsgType(msgType)).Str("FromApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 
 	switch msgType {
-	case "8", "9":
+	case "8": // "9":
 		// Single Order Execution Report
 		clientID, _ := msg.Body.GetString(11)
 		if err == nil {
