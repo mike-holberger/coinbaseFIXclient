@@ -143,48 +143,33 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 	}
 	log.Debug().Str("MsgType", getMsgType(msgType)).Str("FromApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 
-	switch msgType {
-	case "8": // "9":
-		// Single Order Execution Report
-		clientID, _ := msg.Body.GetString(11)
-		if err == nil {
-			// Look for clientID in callback channels
-			e.execReports.mu.Lock()
-			for i, callback := range e.execReports.reportChans {
-				if callback.clientID == clientID {
-					// Unmarshal Execution report and send to chan for that clientID
-					execReport := e.UnmarshalExecReport(msg.String())
-					callback.callbackCh <- execReport
-					close(callback.callbackCh)
+	var clientID string
 
-					// Remove from callback chans
-					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
-					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
-					break
-				}
-			}
-			e.execReports.mu.Unlock()
-		}
+	switch msgType {
+	case "8":
+		// Order Execution Report
+		clientID, _ = msg.Body.GetString(11)
 	case "U7":
 		// Batch Execution Report
-		batchID, _ := msg.Body.GetString(8014)
-		// Look for batchID in reject channels
-		e.execReports.mu.Lock()
-		for i, callback := range e.execReports.reportChans {
-			if callback.clientID == batchID {
-				// Unmarshal Execution report and send to chan for that clientID
-				rejectReport := e.UnmarshalExecReport(msg.String())
-				callback.callbackCh <- rejectReport
-				close(callback.callbackCh)
-
-				// Remove from callback chans
-				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
-				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
-				break
-			}
-		}
-		e.execReports.mu.Unlock()
+		clientID, _ = msg.Body.GetString(8014)
 	}
+
+	// Look for clientID in callback channels
+	e.execReports.mu.Lock()
+	for i, callback := range e.execReports.reportChans {
+		if callback.clientID == clientID {
+			// Unmarshal Execution report and send to chan for that clientID
+			execReport := e.UnmarshalExecReport(msg.String())
+			callback.callbackCh <- execReport
+			close(callback.callbackCh)
+
+			// Remove from callback chans
+			e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+			e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+			break
+		}
+	}
+	e.execReports.mu.Unlock()
 
 	return
 }

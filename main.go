@@ -36,7 +36,7 @@ func main() {
 		log.Fatal().Err(err).Msgf("Logon Error")
 	}
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
