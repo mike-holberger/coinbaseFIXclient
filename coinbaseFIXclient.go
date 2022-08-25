@@ -327,8 +327,13 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 
 		err = fmt.Errorf("Single Order Context Timout")
 		return
-	case report := <-callbackChan:
-		return report, nil
+	case execReport = <-callbackChan:
+		if execReport.OrdStatus == "8" {
+			err = fmt.Errorf("Order Rejected: %s", execReport.Text)
+			return
+		}
+
+		return
 	}
 }
 
