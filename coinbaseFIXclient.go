@@ -3,9 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -50,7 +47,7 @@ type execReportChan struct {
 	callbackCh chan ExecutionReport
 }
 
-func (e *CoinbaseFIXclient) Logon(key, secret, passphrase string) (err error) {
+func (e *CoinbaseFIXclient) Logon(key, secret, passphrase string, ctx context.Context) (err error) {
 	e.key = key
 	e.secret = secret
 	e.pass = passphrase
@@ -89,20 +86,67 @@ func (e *CoinbaseFIXclient) Logon(key, secret, passphrase string) (err error) {
 		return fmt.Errorf("Unable to create Initiator: %s\n", err)
 	}
 
+	// Create callback channel and wait for Logon event
+	callbackChan := make(chan ExecutionReport)
+
+	e.execReports.mu.Lock()
+	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+		clientID:   "Logon",
+		callbackCh: callbackChan,
+	})
+	e.execReports.mu.Unlock()
+
 	err = e.initiator.Start()
 	if err != nil {
-		return fmt.Errorf("Unable to start Initiator: %s\n", err)
+		err = fmt.Errorf("Unable to start Initiator: %s\n", err)
+
+		// Cleanup callback chan
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			if reportChans.clientID == "Logon" {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chans
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		return
 	}
 
-	// TODO: Logon callback
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	return
+	select {
+	case <-ctx.Done():
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			// Remove Logon callcack chan
+			if reportChans.clientID == "Logon" {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chans
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		err = fmt.Errorf("Single Order Context Timout")
+		return
+	case <-callbackChan:
+		return
+	}
+
 }
 
 func (e CoinbaseFIXclient) Logout() {
 	e.initiator.Stop()
-
-	// TODO: Logout callback
 }
 
 func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
@@ -166,6 +210,21 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 
 	err = quickfix.Send(msg)
 	if err != nil {
+		// Cleanup callback chan
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			// Remove ExecReport chan
+			if reportChans.clientID == order.ClientID {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chans
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
 		return
 	}
 
@@ -205,8 +264,6 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	cancelID := uuid.New().String()
 
-	println("??????: " + cancelID)
-
 	oc := fix42ordercancel.New(
 		field.NewOrigClOrdID(order.ClientID),
 		field.NewClOrdID(cancelID),
@@ -220,56 +277,7 @@ func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	//if !waitForExecReport {
-	err = quickfix.Send(msg)
-	return
-	//}
-
-	// // Create callback channel and Wait for ExecReport
-	// callbackChan := make(chan ExecutionReport)
-
-	// e.execReports.mu.Lock()
-	// e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
-	// 	clientID:   cancelID,
-	// 	callbackCh: callbackChan,
-	// })
-	// e.execReports.mu.Unlock()
-
-	// err = quickfix.Send(msg)
-	// if err != nil {
-	// 	return
-	// }
-
-	// if ctx == nil {
-	// 	ctx = context.Background()
-	// }
-
-	// select {
-	// case <-ctx.Done():
-	// 	e.execReports.mu.Lock()
-	// 	for i, reportChans := range e.execReports.reportChans {
-	// 		// Remove ExecReport chan
-	// 		if reportChans.clientID == cancelID {
-	// 			close(reportChans.callbackCh)
-
-	// 			// Remove from callback chans
-	// 			e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
-	// 			e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
-	// 			break
-	// 		}
-	// 	}
-	// 	e.execReports.mu.Unlock()
-
-	// 	err = fmt.Errorf("Cancel Order Context Timout")
-	// 	return
-	// case execReport = <-callbackChan:
-	// 	if execReport.OrdStatus == "8" {
-	// 		err = fmt.Errorf("Cancel Order Rejected: %s", execReport.Text)
-	// 		return
-	// 	}
-
-	// 	return
-	// }
+	return quickfix.Send(msg)
 }
 
 func (e CoinbaseFIXclient) OrderStatus() (err error) {
@@ -335,6 +343,34 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 	// Send Msg
 	err = quickfix.Send(msg)
 	if err != nil {
+		// Clean up callback channels
+		e.execReports.mu.Lock()
+	ERR_ORDERS:
+		for _, ord := range orders {
+			for i, reportChans := range e.execReports.reportChans {
+				// Remove reject chan
+				if reportChans.clientID == batchID {
+					close(reportChans.callbackCh)
+
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					continue
+				}
+
+				// Remove ExecReport chans
+				if reportChans.clientID == ord.ClientID {
+					close(reportChans.callbackCh)
+
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					continue ERR_ORDERS
+				}
+			}
+		}
+		e.execReports.mu.Unlock()
+
 		return
 	}
 
@@ -441,22 +477,6 @@ func (e CoinbaseFIXclient) getDefaultSettings() (appSettings *quickfix.Settings)
 
 	appSettings.AddSession(sessionSettings)
 
-	return
-}
-
-func (e CoinbaseFIXclient) sign(presign string, secret string) (rawData string, err error) {
-	key, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil {
-		return
-	}
-
-	mac := hmac.New(sha256.New, key)
-	_, err = mac.Write([]byte(presign))
-	if err != nil {
-		return
-	}
-
-	rawData = base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return
 }
 

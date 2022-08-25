@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +19,21 @@ func (e CoinbaseFIXclient) OnCreate(sessionID quickfix.SessionID) {
 
 // OnLogon implemented as part of Application interface
 func (e CoinbaseFIXclient) OnLogon(sessionID quickfix.SessionID) {
+	// Look for clientID in callback channels
+	e.execReports.mu.Lock()
+	for i, callback := range e.execReports.reportChans {
+		if callback.clientID == "Logon" {
+			callback.callbackCh <- ExecutionReport{}
+			close(callback.callbackCh)
+
+			// Remove from callback chans
+			e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+			e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+			break
+		}
+	}
+	e.execReports.mu.Unlock()
+
 	log.Info().Interface("OnLogon", sessionID).Send()
 }
 
@@ -69,7 +87,7 @@ func (e CoinbaseFIXclient) ToAdmin(msg *quickfix.Message, sessionID quickfix.Ses
 			e.pass,
 		}, "\x01")
 
-		rawData, err := e.sign(presign, e.secret)
+		rawData, err := sign(presign, e.secret)
 		if err != nil {
 			log.Error().Err(err).Msg("ToApp Logon Signature")
 			return
@@ -129,5 +147,21 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 	}
 	e.execReports.mu.Unlock()
 
+	return
+}
+
+func sign(presign string, secret string) (rawData string, err error) {
+	key, err := base64.StdEncoding.DecodeString(secret)
+	if err != nil {
+		return
+	}
+
+	mac := hmac.New(sha256.New, key)
+	_, err = mac.Write([]byte(presign))
+	if err != nil {
+		return
+	}
+
+	rawData = base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return
 }
