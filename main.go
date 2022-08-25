@@ -87,9 +87,7 @@ func main() {
 	// 	Side:     Side_BUY,
 	// })
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	cbFIXclient.Logout()
-
-	return
 }

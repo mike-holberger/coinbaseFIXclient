@@ -158,7 +158,7 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 					callback.callbackCh <- execReport
 					close(callback.callbackCh)
 
-					// Remove from callback chans
+					// Remove from callback chan
 					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 					break
@@ -178,7 +178,7 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 				callback.rejectChan <- rejectReport
 				close(callback.rejectChan)
 
-				// Remove from callback chans
+				// Remove from callback chan
 				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
 				break
@@ -421,21 +421,40 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 			err = fmt.Errorf("ExecutionReport Callback Timout")
 			return
 		case report := <-callbackChan:
-			execReports = append(execReports, report)
-		case rejct := <-batchRejectChan:
-			// NO EXEC REPORTS, close and remove execReport chans
-			for _, ord := range orders {
-				for i, reportChans := range e.execReports.reportChans {
-					if reportChans.clientID != ord.ClientID {
-						continue
-					}
-					close(reportChans.callbackCh)
+			// Remove reject chan
+			e.execReports.mu.Lock()
+			for i, reportChans := range e.execReports.reportChans {
+				if reportChans.clientID == batchID {
+					close(reportChans.rejectChan)
 
-					// Remove from callback chans
+					// Remove from callback chan
 					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
 					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					println("remove " + reportChans.clientID)
+					continue
 				}
 			}
+			e.execReports.mu.Unlock()
+
+			execReports = append(execReports, report)
+
+		case rejct := <-batchRejectChan:
+			// NO EXEC REPORTS, close and remove execReport chans
+			e.execReports.mu.Lock()
+		ORDERS:
+			for _, ord := range orders {
+				for i, reportChans := range e.execReports.reportChans {
+					if reportChans.clientID == ord.ClientID {
+						close(reportChans.callbackCh)
+
+						// Remove from callback chan
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						continue ORDERS
+					}
+				}
+			}
+			e.execReports.mu.Unlock()
 
 			err = fmt.Errorf(rejct.RejectReason)
 			return
