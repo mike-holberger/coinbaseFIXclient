@@ -233,11 +233,15 @@ func (e *CoinbaseFIXclient) Logon(key, secret, passphrase string) (err error) {
 		return fmt.Errorf("Unable to start Initiator: %s\n", err)
 	}
 
+	// TODO: Logon callback
+
 	return
 }
 
 func (e CoinbaseFIXclient) Logout() {
 	e.initiator.Stop()
+
+	// TODO: Logout callback
 }
 
 func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {

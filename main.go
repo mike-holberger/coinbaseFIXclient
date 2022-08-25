@@ -79,7 +79,7 @@ func main() {
 	log.Info().Interface("ExecReports", execReports).Send()
 	//	}
 
-	time.Sleep(3 * time.Second)
+	//time.Sleep(3 * time.Second)
 
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
