@@ -81,11 +81,19 @@ func main() {
 
 	time.Sleep(3 * time.Second)
 
-	err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	execReport, err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
 		ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
 		Symbol:   "ETH-USD",
 		Side:     Side_BUY,
-	})
+	}, true, ctx)
+	if err != nil {
+		log.Error().Err(err).Msgf("Cancel Single Order Error")
+	} else {
+		log.Info().Interface("ExecReport", execReport).Send()
+	}
 
 	time.Sleep(6 * time.Second)
 

@@ -145,7 +145,7 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 	log.Debug().Str("MsgType", getMsgType(msgType)).Str("FromApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 
 	switch msgType {
-	case "8":
+	case "8", "9":
 		// Single Order Execution Report
 		clientID, _ := msg.Body.GetString(11)
 		if err == nil {
@@ -329,7 +329,7 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 		return
 	case execReport = <-callbackChan:
 		if execReport.OrdStatus == "8" {
-			err = fmt.Errorf("Order Rejected: %s", execReport.Text)
+			err = fmt.Errorf("Single Order Rejected: %s", execReport.Text)
 			return
 		}
 
@@ -338,12 +338,12 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 }
 
 // Fastest way to cancel an order. Must include ClientID, Symbol, and Side
-func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
-	id := uuid.New().String()
+func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX, waitForExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
+	cancelID := uuid.New().String()
 
 	oc := fix42ordercancel.New(
 		field.NewOrigClOrdID(order.ClientID),
-		field.NewClOrdID(id),
+		field.NewClOrdID(cancelID),
 		field.NewSymbol(order.Symbol),
 		field.NewSide(enum.Side(order.Side)),
 		field.NewTransactTime(time.Now().UTC()),
@@ -354,12 +354,56 @@ func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	//if !waitForExecReport {
-	err = quickfix.Send(msg)
-	return
-	//}
+	if !waitForExecReport {
+		err = quickfix.Send(msg)
+		return
+	}
 
-	//return
+	// Create callback channel and Wait for ExecReport
+	callbackChan := make(chan ExecutionReport)
+
+	e.execReports.mu.Lock()
+	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+		clientID:   cancelID,
+		callbackCh: callbackChan,
+	})
+	e.execReports.mu.Unlock()
+
+	err = quickfix.Send(msg)
+	if err != nil {
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	select {
+	case <-ctx.Done():
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			// Remove ExecReport chan
+			if reportChans.clientID == cancelID {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chans
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		err = fmt.Errorf("Cancel Order Context Timout")
+		return
+	case execReport = <-callbackChan:
+		if execReport.OrdStatus == "8" {
+			err = fmt.Errorf("Cancel Order Rejected: %s", execReport.Text)
+			return
+		}
+
+		return
+	}
 }
 
 func (e CoinbaseFIXclient) OrderStatus() (err error) {
@@ -576,6 +620,8 @@ func getMsgType(msgType string) string {
 		return "Order-Single"
 	case "8":
 		return "ExecReport"
+	case "9":
+		return "CancelReject-Single"
 	case "5":
 		return "Logout"
 	case "U6":
