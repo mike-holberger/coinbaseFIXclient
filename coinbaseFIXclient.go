@@ -311,7 +311,21 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 
 	select {
 	case <-ctx.Done():
-		err = fmt.Errorf("ExecutionReport Callback Timout")
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			// Remove ExecReport chan
+			if reportChans.clientID == order.ClientID {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chan
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		err = fmt.Errorf("Single Order Context Timout")
 		return
 	case report := <-callbackChan:
 		return report, nil
@@ -416,9 +430,49 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 	// Wait for ExecReports
 	for _, callbackChan := range chans {
 		select {
-		case <-ctx.Done():
-			err = fmt.Errorf("ExecutionReport Callback Timout")
+		// Batch successful - collect reports and remove reject channel
+		case report := <-callbackChan:
+			// Remove reject chan
+			e.execReports.mu.Lock()
+			for i, reportChans := range e.execReports.reportChans {
+				if reportChans.clientID == batchID {
+					close(reportChans.rejectChan)
 
+					// Remove from callback chan
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					println("remove " + reportChans.clientID)
+					continue
+				}
+			}
+			e.execReports.mu.Unlock()
+
+			execReports = append(execReports, report)
+
+		// Batch rejected - collect reject report and remove execReport channels
+		case rejct := <-batchRejectChan:
+			// close and remove execReport chans
+			e.execReports.mu.Lock()
+		REJECT_ORDERS:
+			for _, ord := range orders {
+				for i, reportChans := range e.execReports.reportChans {
+					if reportChans.clientID == ord.ClientID {
+						close(reportChans.callbackCh)
+
+						// Remove from callback chan
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						continue REJECT_ORDERS
+					}
+				}
+			}
+			e.execReports.mu.Unlock()
+
+			err = fmt.Errorf(rejct.RejectReason)
+			return
+
+		// Batch Context Timeout - close and remove all callback channels
+		case <-ctx.Done():
 			// Remove all callback chans
 			e.execReports.mu.Lock()
 		CTX_ORDERS:
@@ -448,44 +502,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 			}
 			e.execReports.mu.Unlock()
 
-			return
-		case report := <-callbackChan:
-			// Remove reject chan
-			e.execReports.mu.Lock()
-			for i, reportChans := range e.execReports.reportChans {
-				if reportChans.clientID == batchID {
-					close(reportChans.rejectChan)
-
-					// Remove from callback chan
-					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
-					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
-					println("remove " + reportChans.clientID)
-					continue
-				}
-			}
-			e.execReports.mu.Unlock()
-
-			execReports = append(execReports, report)
-
-		case rejct := <-batchRejectChan:
-			// NO EXEC REPORTS, close and remove execReport chans
-			e.execReports.mu.Lock()
-		ORDERS:
-			for _, ord := range orders {
-				for i, reportChans := range e.execReports.reportChans {
-					if reportChans.clientID == ord.ClientID {
-						close(reportChans.callbackCh)
-
-						// Remove from callback chan
-						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
-						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
-						continue ORDERS
-					}
-				}
-			}
-			e.execReports.mu.Unlock()
-
-			err = fmt.Errorf(rejct.RejectReason)
+			err = fmt.Errorf("Batch Order Context Timout")
 			return
 		}
 	}
