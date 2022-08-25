@@ -371,7 +371,6 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 	}
 
 	nob.SetGroup(group)
-	///
 
 	msg := nob.ToMessage()
 	msg.Header.Set(field.NewSenderCompID(e.key))
@@ -419,6 +418,36 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 		select {
 		case <-ctx.Done():
 			err = fmt.Errorf("ExecutionReport Callback Timout")
+
+			// Remove all callback chans
+			e.execReports.mu.Lock()
+		CTX_ORDERS:
+			for _, ord := range orders {
+				for i, reportChans := range e.execReports.reportChans {
+					// Remove reject chan
+					if reportChans.clientID == batchID {
+						close(reportChans.rejectChan)
+
+						// Remove from callback chan
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						println("remove " + reportChans.clientID)
+						continue
+					}
+
+					// Remove ExecReport chans
+					if reportChans.clientID == ord.ClientID {
+						close(reportChans.callbackCh)
+
+						// Remove from callback chan
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						continue CTX_ORDERS
+					}
+				}
+			}
+			e.execReports.mu.Unlock()
+
 			return
 		case report := <-callbackChan:
 			// Remove reject chan
