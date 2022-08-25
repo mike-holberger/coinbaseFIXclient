@@ -70,22 +70,22 @@ func main() {
 			Side:      Side_BUY,
 			OrderType: OrdType_LIMIT,
 			Price:     "1600",
-			Qty:       "0.06",
+			Qty:       "0.02",
 		},
 	}, true, ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("NewOrdersBatch Error")
-	} else {
-		log.Info().Interface("ExecReports", execReports).Send()
-	}
+	} //else {
+	log.Info().Interface("ExecReports", execReports).Send()
+	//	}
 
-	time.Sleep(4 * time.Second)
+	time.Sleep(3 * time.Second)
 
-	// err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
-	// 	ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
-	// 	Symbol:   "ETH-USD",
-	// 	Side:     Side_BUY,
-	// })
+	err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
+		ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
+		Symbol:   "ETH-USD",
+		Side:     Side_BUY,
+	})
 
 	time.Sleep(6 * time.Second)
 
