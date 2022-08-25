@@ -280,12 +280,12 @@ func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	return quickfix.Send(msg)
 }
 
-func (e CoinbaseFIXclient) OrderStatus() (err error) {
+func (e CoinbaseFIXclient) OrderStatus(clientID string, symbol string, ctx context.Context) (err error) {
 
 	return
 }
 
-// Beta only?
+// Beta/Sandbox only?
 func (e CoinbaseFIXclient) ModifyOrder() (err error) {
 
 	return

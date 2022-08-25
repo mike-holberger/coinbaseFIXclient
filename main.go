@@ -86,10 +86,10 @@ func main() {
 	defer cancel()
 
 	err = cbFIXclient.OrderCancel(CoinbaseOrderFIX{
-		ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
+		ClientID: "509e971a-1e70-11ed-861d-0242ac120054",
 		Symbol:   "ETH-USD",
 		Side:     Side_BUY,
-	}) // , true, ctx)
+	})
 	if err != nil {
 		log.Error().Err(err).Msgf("Cancel Single Order Error")
 	}
