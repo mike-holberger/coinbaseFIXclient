@@ -781,7 +781,7 @@ func (e CoinbaseFIXclient) OrderStatusByOrderID(orderIDandSymbol OrderIDandSymbo
 	}
 }
 
-func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseFIXorder, awaitExecReports bool, ctx context.Context) (execReports []ExecutionReport, err error) {
+func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseFIXorderLIMIT, awaitExecReports bool, ctx context.Context) (execReports []ExecutionReport, err error) {
 	nob := fix42neworderbatch.New(field.NewBatchID(batchID))
 	nob.SetString(73, fmt.Sprintf("%d", len(orders)))
 
@@ -979,25 +979,6 @@ func (e CoinbaseFIXclient) ModifyOrder() (err error) {
 	// TODO:
 
 	return
-}
-
-type CoinbaseFIXorder struct {
-	// User defined order ID
-	ClientID string
-	// Example: "ETH-USD"
-	Symbol string
-	// Enum: OrderSide_BUY or OrderSide_SELL
-	Side Side
-	// Enum: OrderType_MARKET, OrderType_LIMIT, or OrderType_STOP
-	OrderType OrdType
-	Price     string
-	Qty       string
-	// Order size in quote units (e.g., USD) (Market order only)
-	CashOrderQty string
-	// OPTIONAL Enum: OrderTimeInForce_GOOD_TILL_CANCEL (default), OrderTimeInForce_IMMEDIATE_OR_CANCEL, OrderTimeInForce_FILL_OR_KILL, or OrderTimeInForce_POST_ONLY
-	TimeInForce enum.TimeInForce
-	// OPTIONAL Enum: OrderTimeInForce_DECREMENT_AND_CANCEL (default), OrderTimeInForce_CANCEL_RESTING, OrderTimeInForce_CANCEL_INCOMING, or OrderTimeInForce_CANCEL_BOTH
-	SelfTradePrevention enum.SelfTradePrevention
 }
 
 type CoinbaseFIXorderLIMIT struct {

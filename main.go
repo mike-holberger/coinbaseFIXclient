@@ -55,22 +55,20 @@ func main() {
 		log.Info().Interface("ExecReport", execReport).Send()
 	}
 
-	execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseFIXorder{
+	execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseFIXorderLIMIT{
 		{
-			ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
-			Symbol:    "ETH-USD",
-			Side:      Side_BUY,
-			OrderType: OrdType_LIMIT,
-			Price:     "1550",
-			Qty:       "0.02",
+			ClientID: "509e971a-1e70-11ed-861d-0242ac120002",
+			Symbol:   "ETH-USD",
+			Side:     Side_BUY,
+			Price:    "1550",
+			Qty:      "0.02",
 		},
 		{
-			ClientID:  "509e971a-1e70-11ed-861d-0242ac120055",
-			Symbol:    "ETH-USD",
-			Side:      Side_BUY,
-			OrderType: OrdType_LIMIT,
-			Price:     "1600",
-			Qty:       "0.02",
+			ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
+			Symbol:   "ETH-USD",
+			Side:     Side_BUY,
+			Price:    "1600",
+			Qty:      "0.02",
 		},
 	}, true, ctx)
 	if err != nil {
