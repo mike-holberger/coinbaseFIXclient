@@ -22,7 +22,7 @@ func (e CoinbaseFIXclient) OnLogon(sessionID quickfix.SessionID) {
 	// Look for clientID in callback channels
 	e.execReports.mu.Lock()
 	for i, callback := range e.execReports.reportChans {
-		if callback.clientID == "Logon" {
+		if callback.callbackID == "Logon" {
 			callback.callbackCh <- ExecutionReport{}
 			close(callback.callbackCh)
 
@@ -119,24 +119,27 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 	}
 	log.Debug().Str("MsgType", getMsgType(msgType)).Str("FromApp", strings.Replace(msg.String(), "\x01", " ", -1)).Send()
 
-	var clientID string
+	var callbackID string
 
 	switch msgType {
 	case "8":
 		// Order Execution Report
-		clientID, _ = msg.Body.GetString(11)
+		callbackID, _ = msg.Body.GetString(11)
 		if execType, _ := msg.Body.GetString(150); execType == "I" {
-			clientID = clientID + "I"
+			callbackID = callbackID + "I"
 		}
+	case "9":
+		// Order Execution Report
+		callbackID, _ = msg.Body.GetString(37)
 	case "U7":
 		// Batch Execution Report
-		clientID, _ = msg.Body.GetString(8014)
+		callbackID, _ = msg.Body.GetString(8014)
 	}
 
 	// Look for clientID in callback channels
 	e.execReports.mu.Lock()
 	for i, callback := range e.execReports.reportChans {
-		if callback.clientID == clientID {
+		if callback.callbackID == callbackID {
 			// Unmarshal Execution report and send to chan for that clientID
 			execReport := e.UnmarshalExecReport(msg.String())
 			callback.callbackCh <- execReport
