@@ -15,6 +15,7 @@ import (
 	fix42neworderbatch "coinbaseFIXclient/internal/fix42/neworderbatch"
 	fix42neworderlist "coinbaseFIXclient/internal/fix42/neworderlist"
 	fix42nos "coinbaseFIXclient/internal/fix42/newordersingle"
+	fix42cancelorderbatch "coinbaseFIXclient/internal/fix42/ordercancelbatchrequest"
 	fix42ordercancel "coinbaseFIXclient/internal/fix42/ordercancelrequest"
 	fix42orderstatus "coinbaseFIXclient/internal/fix42/orderstatusrequest"
 
@@ -575,8 +576,25 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 	return
 }
 
-func (e CoinbaseFIXclient) OrderCancelBatch() (err error) {
+func (e CoinbaseFIXclient) OrderCancelBatch(batchID string, orders []CoinbaseOrderFIX) (err error) {
+	ocb := fix42cancelorderbatch.New(field.NewBatchID(batchID))
+	ocb.SetString(73, fmt.Sprintf("%d", len(orders)))
 
+	group := fix42cancelorderbatch.NewNoOrdersRepeatingGroup()
+
+	for _, ord := range orders {
+		g := group.Add()
+		g.Set(field.NewOrigClOrdID(ord.ClientID))
+		g.SetString(55, strings.ToUpper(ord.Symbol))
+	}
+
+	ocb.SetGroup(group)
+
+	msg := ocb.ToMessage()
+	msg.Header.Set(field.NewSenderCompID(e.key))
+	msg.Header.Set(field.NewTargetCompID(cbtarget))
+
+	err = quickfix.Send(msg)
 	return
 }
 
@@ -633,13 +651,17 @@ func getMsgType(msgType string) string {
 	case "8":
 		return "ExecReport"
 	case "9":
-		return "CancelReject-Single"
+		return "Cancel-Reject"
 	case "5":
 		return "Logout"
+	case "U4":
+		return "Order-Cancel-Batch"
+	case "U5":
+		return "Cancel-Batch-Reject"
 	case "U6":
 		return "Orders-Batch"
 	case "U7":
-		return "BatchRejectReport"
+		return "Orders-Batch-Reject"
 	default:
 		return msgType
 	}
