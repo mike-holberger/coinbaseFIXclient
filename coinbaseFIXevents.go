@@ -168,3 +168,32 @@ func sign(presign string, secret string) (rawData string, err error) {
 	rawData = base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return
 }
+
+func getMsgType(msgType string) string {
+	switch msgType {
+	case "A":
+		return "Logon"
+	case "D":
+		return "Order-Single"
+	case "F":
+		return "Order-Cancel"
+	case "H":
+		return "Order-Status"
+	case "8":
+		return "ExecReport"
+	case "9":
+		return "Cancel-Reject"
+	case "5":
+		return "Logout"
+	case "U4":
+		return "Order-Cancel-Batch"
+	case "U5":
+		return "Cancel-Batch-Reject"
+	case "U6":
+		return "Orders-Batch"
+	case "U7":
+		return "Orders-Batch-Reject"
+	default:
+		return msgType
+	}
+}

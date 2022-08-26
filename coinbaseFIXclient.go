@@ -32,6 +32,27 @@ const (
 	cfgFileName = "quickfix.cfg"
 )
 
+func (e CoinbaseFIXclient) getDefaultSettings() (appSettings *quickfix.Settings) {
+	appSettings = &quickfix.Settings{}
+
+	globalSettings := appSettings.GlobalSettings()
+	//globalSettings.Set("FileLogPath", "logs")
+	globalSettings.Set("HeartBtInt", "30")
+	globalSettings.Set("ResetOnLogon", "Y")
+	globalSettings.Set("SenderCompID", e.key)
+	globalSettings.Set("SocketConnectHost", cbHostName)
+	globalSettings.Set("SocketConnectPort", cbPort)
+	globalSettings.Set("SocketUseSSL", "Y")
+	globalSettings.Set("TargetCompID", cbtarget)
+
+	sessionSettings := &quickfix.SessionSettings{}
+	sessionSettings.Set("BeginString", "FIX.4.2")
+
+	appSettings.AddSession(sessionSettings)
+
+	return
+}
+
 // CoinbaseFIXclient implements the quickfix.Application interface
 type CoinbaseFIXclient struct {
 	initiator         *quickfix.Initiator
@@ -79,13 +100,16 @@ func (e *CoinbaseFIXclient) Logon(key, secret, passphrase string, ctx context.Co
 	}
 
 	fileLogFactory, err := quickfix.NewFileLogFactory(appSettings)
-	if err != nil {
-		return fmt.Errorf("Error creating file log factory: %s,", err)
-	}
-
-	e.initiator, err = quickfix.NewInitiator(*e, quickfix.NewMemoryStoreFactory(), appSettings, fileLogFactory)
-	if err != nil {
-		return fmt.Errorf("Unable to create Initiator: %s\n", err)
+	if err == nil {
+		e.initiator, err = quickfix.NewInitiator(*e, quickfix.NewMemoryStoreFactory(), appSettings, fileLogFactory)
+		if err != nil {
+			return fmt.Errorf("Unable to create Initiator: %s\n", err)
+		}
+	} else {
+		e.initiator, err = quickfix.NewInitiator(*e, quickfix.NewMemoryStoreFactory(), appSettings, quickfix.NewNullLogFactory())
+		if err != nil {
+			return fmt.Errorf("Unable to create Initiator: %s\n", err)
+		}
 	}
 
 	// Create callback channel and wait for Logon event
@@ -598,27 +622,6 @@ func (e CoinbaseFIXclient) OrderCancelBatch(batchID string, orders []CoinbaseOrd
 	return
 }
 
-func (e CoinbaseFIXclient) getDefaultSettings() (appSettings *quickfix.Settings) {
-	appSettings = &quickfix.Settings{}
-
-	globalSettings := appSettings.GlobalSettings()
-	globalSettings.Set("FileLogPath", "logs")
-	globalSettings.Set("HeartBtInt", "30")
-	globalSettings.Set("ResetOnLogon", "Y")
-	globalSettings.Set("SenderCompID", e.key)
-	globalSettings.Set("SocketConnectHost", cbHostName)
-	globalSettings.Set("SocketConnectPort", cbPort)
-	globalSettings.Set("SocketUseSSL", "Y")
-	globalSettings.Set("TargetCompID", cbtarget)
-
-	sessionSettings := &quickfix.SessionSettings{}
-	sessionSettings.Set("BeginString", "FIX.4.2")
-
-	appSettings.AddSession(sessionSettings)
-
-	return
-}
-
 type CoinbaseOrderFIX struct {
 	// User defined order ID
 	ClientID string
@@ -636,33 +639,4 @@ type CoinbaseOrderFIX struct {
 	TimeInForce enum.TimeInForce
 	// OPTIONAL Enum: OrderTimeInForce_DECREMENT_AND_CANCEL (default), OrderTimeInForce_CANCEL_RESTING, OrderTimeInForce_CANCEL_INCOMING, or OrderTimeInForce_CANCEL_BOTH
 	SelfTradePrevention enum.SelfTradePrevention
-}
-
-func getMsgType(msgType string) string {
-	switch msgType {
-	case "A":
-		return "Logon"
-	case "D":
-		return "Order-Single"
-	case "F":
-		return "Order-Cancel"
-	case "H":
-		return "Order-Status"
-	case "8":
-		return "ExecReport"
-	case "9":
-		return "Cancel-Reject"
-	case "5":
-		return "Logout"
-	case "U4":
-		return "Order-Cancel-Batch"
-	case "U5":
-		return "Cancel-Batch-Reject"
-	case "U6":
-		return "Orders-Batch"
-	case "U7":
-		return "Orders-Batch-Reject"
-	default:
-		return msgType
-	}
 }
