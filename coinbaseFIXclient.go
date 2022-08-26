@@ -13,12 +13,12 @@ import (
 	"coinbaseFIXclient/internal/enum"
 	"coinbaseFIXclient/internal/field"
 	fix42neworderbatch "coinbaseFIXclient/internal/fix42/neworderbatch"
-	fix42neworderlist "coinbaseFIXclient/internal/fix42/neworderlist"
 	fix42nos "coinbaseFIXclient/internal/fix42/newordersingle"
-	fix42cancelorderbatch "coinbaseFIXclient/internal/fix42/ordercancelbatchrequest"
+	fix42ordercancelbatch "coinbaseFIXclient/internal/fix42/ordercancelbatchrequest"
 	fix42ordercancel "coinbaseFIXclient/internal/fix42/ordercancelrequest"
 	fix42orderstatus "coinbaseFIXclient/internal/fix42/orderstatusrequest"
 
+	"github.com/google/uuid"
 	"github.com/quickfixgo/quickfix"
 	"github.com/rs/zerolog/log"
 )
@@ -173,7 +173,7 @@ func (e CoinbaseFIXclient) Logout() {
 	e.initiator.Stop()
 }
 
-func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseFIXorder, waitForExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
+func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseFIXorder, awaitExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
 	if order.ClientID == "" {
 		err = fmt.Errorf("Order must contain a ClientID")
 		return
@@ -217,7 +217,7 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseFIXorder, waitForExecRep
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	if !waitForExecReport {
+	if !awaitExecReport {
 		err = quickfix.Send(msg)
 		return
 	}
@@ -284,13 +284,13 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseFIXorder, waitForExecRep
 	}
 }
 
-// Fastest way to cancel an order. Must include ClientID, Symbol, and Side
+// Fastest way to cancel an order. Must include ClientID, and Symbol
 func (e CoinbaseFIXclient) OrderCancelByClientID(clientIDandSymbol ClientIDandSymbol) (err error) {
-	// cancelID := uuid.New().String()
+	cancelID := uuid.New().String()
 
 	oc := fix42ordercancel.New(
 		field.NewOrigClOrdID(clientIDandSymbol.ClientID),
-		field.NewClOrdID("cancelID"),
+		field.NewClOrdID(cancelID),
 		field.NewSymbol(clientIDandSymbol.Symbol),
 		field.NewSide(enum.Side_SELL),           // THIS FIELD IGNORED BY SERVER
 		field.NewTransactTime(time.Now().UTC()), // THIS FIELD IGNORED BY SERVER
@@ -301,14 +301,13 @@ func (e CoinbaseFIXclient) OrderCancelByClientID(clientIDandSymbol ClientIDandSy
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	//if !waitForExecReport {
+	//if !awaitExecReport {
 	err = quickfix.Send(msg)
 	return
 	//}
 
 	///
-	/// COINBASE'S SUCCESSFULL CANCEL ORDER EXEC REPORTS DO NOT RETURN THE CLIENT ID FIELD...?
-	/// (BUT REJECTED CANCEL REPORTS DO)
+	/// COINBASE'S SUCCESSFULL CANCEL ORDER EXEC REPORTS DO NOT RETURN THE CLIENT ID FIELD...? (REJECTED REPORTS DO)
 	/// NOT NECESSARY TO AWAIT REPORT. ASSUME SUCCESSFUL CANCEL, OR ORDER DOESNT EXIST
 	///
 
@@ -435,11 +434,11 @@ func (e CoinbaseFIXclient) ModifyOrder() (err error) {
 	return
 }
 
-func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseFIXorder, waitForExecReports bool, ctx context.Context) (execReports []ExecutionReport, err error) {
+func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseFIXorder, awaitExecReports bool, ctx context.Context) (execReports []ExecutionReport, err error) {
 	nob := fix42neworderbatch.New(field.NewBatchID(batchID))
 	nob.SetString(73, fmt.Sprintf("%d", len(orders)))
 
-	group := fix42neworderlist.NewNoOrdersRepeatingGroup()
+	group := fix42neworderbatch.NewNoOrdersRepeatingGroup()
 
 	for _, ord := range orders {
 		g := group.Add()
@@ -457,7 +456,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseFIXor
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	if !waitForExecReports {
+	if !awaitExecReports {
 		err = quickfix.Send(msg)
 		return
 	}
@@ -598,11 +597,13 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseFIXor
 	return
 }
 
-func (e CoinbaseFIXclient) OrderCancelBatch(batchID string, orders []ClientIDandSymbol) (err error) {
-	ocb := fix42cancelorderbatch.New(field.NewBatchID(batchID))
-	ocb.SetString(73, fmt.Sprintf("%d", len(orders)))
+func (e CoinbaseFIXclient) OrderCancelBatchByClientID(orders []ClientIDandSymbol) (err error) {
+	cancelID := uuid.New().String()
 
-	group := fix42cancelorderbatch.NewNoOrdersRepeatingGroup()
+	cob := fix42ordercancelbatch.New(field.NewBatchID(cancelID))
+	cob.SetString(73, fmt.Sprintf("%d", len(orders)))
+
+	group := fix42ordercancelbatch.NewNoOrdersRepeatingGroup()
 
 	for _, ord := range orders {
 		g := group.Add()
@@ -610,9 +611,9 @@ func (e CoinbaseFIXclient) OrderCancelBatch(batchID string, orders []ClientIDand
 		g.SetString(55, strings.ToUpper(ord.Symbol))
 	}
 
-	ocb.SetGroup(group)
+	cob.SetGroup(group)
 
-	msg := ocb.ToMessage()
+	msg := cob.ToMessage()
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 

@@ -120,7 +120,7 @@ func main() {
 
 	time.Sleep(2 * time.Second)
 
-	err = cbFIXclient.OrderCancelBatch("CANCEL_BATCH1", []ClientIDandSymbol{
+	err = cbFIXclient.OrderCancelBatchByClientID([]ClientIDandSymbol{
 		{
 			ClientID: "509e971a-1e70-11ed-861d-0242ac120001",
 			Symbol:   "ETH-USD",
