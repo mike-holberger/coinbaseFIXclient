@@ -126,13 +126,16 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 		// Order Execution Report
 		callbackID, _ = msg.Body.GetString(11)
 		if execType, _ := msg.Body.GetString(150); execType == "I" {
+			if callbackID == "" {
+				callbackID, _ = msg.Body.GetString(37)
+			}
 			callbackID = callbackID + "I"
 		}
 	case "9":
-		// Order Execution Report
+		// Cancel Reject Report
 		callbackID, _ = msg.Body.GetString(37)
 	case "U7":
-		// Batch Execution Report
+		// Batch Order Execution Report
 		callbackID, _ = msg.Body.GetString(8014)
 	}
 
