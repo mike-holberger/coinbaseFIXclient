@@ -125,6 +125,9 @@ func (e CoinbaseFIXclient) FromApp(msg *quickfix.Message, sessionID quickfix.Ses
 	case "8":
 		// Order Execution Report
 		clientID, _ = msg.Body.GetString(11)
+		if execType, _ := msg.Body.GetString(150); execType == "I" {
+			clientID = clientID + "I"
+		}
 	case "U7":
 		// Batch Execution Report
 		clientID, _ = msg.Body.GetString(8014)

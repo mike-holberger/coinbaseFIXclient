@@ -16,6 +16,7 @@ import (
 	fix42neworderlist "coinbaseFIXclient/internal/fix42/neworderlist"
 	fix42nos "coinbaseFIXclient/internal/fix42/newordersingle"
 	fix42ordercancel "coinbaseFIXclient/internal/fix42/ordercancelrequest"
+	fix42orderstatus "coinbaseFIXclient/internal/fix42/orderstatusrequest"
 
 	"github.com/google/uuid"
 	"github.com/quickfixgo/quickfix"
@@ -87,7 +88,7 @@ func (e *CoinbaseFIXclient) Logon(key, secret, passphrase string, ctx context.Co
 	}
 
 	// Create callback channel and wait for Logon event
-	callbackChan := make(chan ExecutionReport)
+	callbackChan := make(chan ExecutionReport, 1)
 
 	e.execReports.mu.Lock()
 	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
@@ -199,7 +200,7 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 	}
 
 	// Create callback channel and Wait for ExecReport
-	callbackChan := make(chan ExecutionReport)
+	callbackChan := make(chan ExecutionReport, 1)
 
 	e.execReports.mu.Lock()
 	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
@@ -277,12 +278,126 @@ func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	msg.Header.Set(field.NewSenderCompID(e.key))
 	msg.Header.Set(field.NewTargetCompID(cbtarget))
 
-	return quickfix.Send(msg)
+	//if !waitForExecReport {
+	err = quickfix.Send(msg)
+	return
+	//}
+
+	// // Create callback channel and Wait for ExecReport
+	// callbackChan := make(chan ExecutionReport, 1)
+
+	// e.execReports.mu.Lock()
+	// e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+	// 	clientID:   cancelID,
+	// 	callbackCh: callbackChan,
+	// })
+	// e.execReports.mu.Unlock()
+
+	// err = quickfix.Send(msg)
+	// if err != nil {
+	// 	return
+	// }
+
+	// if ctx == nil {
+	// 	ctx = context.Background()
+	// }
+
+	// select {
+	// case <-ctx.Done():
+	// 	e.execReports.mu.Lock()
+	// 	for i, reportChans := range e.execReports.reportChans {
+	// 		// Remove ExecReport chan
+	// 		if reportChans.clientID == cancelID {
+	// 			close(reportChans.callbackCh)
+
+	// 			// Remove from callback chans
+	// 			e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+	// 			e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+	// 			break
+	// 		}
+	// 	}
+	// 	e.execReports.mu.Unlock()
+
+	// 	err = fmt.Errorf("Cancel Order Context Timout")
+	// 	return
+	// case execReport = <-callbackChan:
+	// 	if execReport.OrdStatus == "8" {
+	// 		err = fmt.Errorf("Cancel Order Rejected: %s", execReport.Text)
+	// 		return
+	// 	}
+
+	// 	return
+	// }
 }
 
-func (e CoinbaseFIXclient) OrderStatus(clientID string, symbol string, ctx context.Context) (err error) {
+func (e CoinbaseFIXclient) OrderStatus(clientID string, symbol string, ctx context.Context) (execReport ExecutionReport, err error) {
+	os := fix42orderstatus.New(
+		field.NewClOrdID(clientID),
+		field.NewSymbol(strings.ToUpper(symbol)),
+		field.NewSide(enum.Side_SELL),
+	)
 
-	return
+	// Finalize and send
+	msg := os.ToMessage()
+	msg.Header.Set(field.NewSenderCompID(e.key))
+	msg.Header.Set(field.NewTargetCompID(cbtarget))
+
+	// Create callback channel and Wait for ExecReport
+	callbackChan := make(chan ExecutionReport, 1)
+
+	e.execReports.mu.Lock()
+	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+		clientID:   clientID + "I",
+		callbackCh: callbackChan,
+	})
+	e.execReports.mu.Unlock()
+
+	err = quickfix.Send(msg)
+	if err != nil {
+		// Cleanup callback chan
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			// Remove ExecReport chan
+			if reportChans.clientID == clientID {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chans
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	select {
+	case <-ctx.Done():
+		e.execReports.mu.Lock()
+		for i, reportChans := range e.execReports.reportChans {
+			// Remove ExecReport chan
+			if reportChans.clientID == clientID {
+				close(reportChans.callbackCh)
+
+				// Remove from callback chans
+				e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+				e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+				break
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		err = fmt.Errorf("Order Status Context Timout")
+		return
+	case execReport = <-callbackChan:
+		return
+	}
+
 }
 
 // Beta/Sandbox only?
@@ -318,7 +433,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 		return
 	}
 
-	batchRejectChan := make(chan ExecutionReport)
+	batchRejectChan := make(chan ExecutionReport, 1)
 	chans := []chan ExecutionReport{}
 
 	// Add batch reject channel
@@ -330,7 +445,7 @@ func (e CoinbaseFIXclient) NewOrdersBatch(batchID string, orders []CoinbaseOrder
 
 	// Add order execReport callback channels
 	for _, order := range orders {
-		callbackChan := make(chan ExecutionReport)
+		callbackChan := make(chan ExecutionReport, 1)
 		chans = append(chans, callbackChan)
 
 		e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
