@@ -173,6 +173,21 @@ func (e CoinbaseFIXclient) Logout() {
 	e.initiator.Stop()
 }
 
+type CoinbaseFIXorderLIMIT struct {
+	// User defined order ID
+	ClientID string
+	// Example: "ETH-USD"
+	Symbol string
+	// Enum: OrderSide_BUY or OrderSide_SELL
+	Side  Side
+	Price string
+	Qty   string
+	// OPTIONAL Enum: OrderTimeInForce_GOOD_TILL_CANCEL (default), OrderTimeInForce_IMMEDIATE_OR_CANCEL, OrderTimeInForce_FILL_OR_KILL, or OrderTimeInForce_POST_ONLY
+	TimeInForce enum.TimeInForce
+	// OPTIONAL Enum: OrderTimeInForce_DECREMENT_AND_CANCEL (default), OrderTimeInForce_CANCEL_RESTING, OrderTimeInForce_CANCEL_INCOMING, or OrderTimeInForce_CANCEL_BOTH
+	SelfTradePrevention enum.SelfTradePrevention
+}
+
 func (e CoinbaseFIXclient) NewOrderSingleLIMIT(order CoinbaseFIXorderLIMIT, awaitExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
 	if order.ClientID == "" {
 		order.ClientID = uuid.NewString()
@@ -283,6 +298,17 @@ func (e CoinbaseFIXclient) NewOrderSingleLIMIT(order CoinbaseFIXorderLIMIT, awai
 	}
 }
 
+type CoinbaseFIXorderMARKET_CASH struct {
+	// User defined order ID
+	ClientID string
+	// Example: "ETH-USD"
+	Symbol string
+	// Enum: OrderSide_BUY or OrderSide_SELL
+	Side Side
+	// Order size in quote units (e.g., USD) (Market order only)
+	CashOrderQty string
+}
+
 func (e CoinbaseFIXclient) NewOrderSingleMARKET_CASH(order CoinbaseFIXorderMARKET_CASH, awaitExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
 	if order.ClientID == "" {
 		order.ClientID = uuid.NewString()
@@ -368,6 +394,16 @@ func (e CoinbaseFIXclient) NewOrderSingleMARKET_CASH(order CoinbaseFIXorderMARKE
 
 		return
 	}
+}
+
+type CoinbaseFIXorderMARKET_QTY struct {
+	// User defined order ID
+	ClientID string
+	// Example: "ETH-USD"
+	Symbol string
+	// Enum: OrderSide_BUY or OrderSide_SELL
+	Side Side
+	Qty  string
 }
 
 func (e CoinbaseFIXclient) NewOrderSingleMARKET_QTY(order CoinbaseFIXorderMARKET_QTY, awaitExecReport bool, ctx context.Context) (execReport ExecutionReport, err error) {
@@ -578,12 +614,14 @@ func (e CoinbaseFIXclient) OrderCancelByOrderID(orderIDandSymbol OrderIDandSymbo
 	cancelID := uuid.NewString()
 
 	oc := fix42ordercancel.New(
-		field.NewOrigClOrdID(orderIDandSymbol.OrderID),
+		field.NewOrigClOrdID(""),
 		field.NewClOrdID(cancelID),
 		field.NewSymbol(orderIDandSymbol.Symbol),
 		field.NewSide(enum.Side_SELL),           // THIS FIELD IGNORED BY SERVER
 		field.NewTransactTime(time.Now().UTC()), // THIS FIELD IGNORED BY SERVER
 	)
+
+	oc.SetString(37, orderIDandSymbol.OrderID)
 
 	// Finalize and send
 	msg := oc.ToMessage()
@@ -600,7 +638,7 @@ func (e CoinbaseFIXclient) OrderCancelByOrderID(orderIDandSymbol OrderIDandSymbo
 
 	e.execReports.mu.Lock()
 	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
-		callbackID: cancelID,
+		callbackID: orderIDandSymbol.OrderID,
 		callbackCh: callbackChan,
 	})
 	e.execReports.mu.Unlock()
@@ -619,7 +657,7 @@ func (e CoinbaseFIXclient) OrderCancelByOrderID(orderIDandSymbol OrderIDandSymbo
 		e.execReports.mu.Lock()
 		for i, reportChans := range e.execReports.reportChans {
 			// Remove ExecReport chan
-			if reportChans.callbackID == cancelID {
+			if reportChans.callbackID == orderIDandSymbol.OrderID {
 				close(reportChans.callbackCh)
 
 				// Remove from callback chans
@@ -633,7 +671,7 @@ func (e CoinbaseFIXclient) OrderCancelByOrderID(orderIDandSymbol OrderIDandSymbo
 		err = fmt.Errorf("Cancel Order Context Timout")
 		return
 	case execReport = <-callbackChan:
-		if execReport.OrdStatus == "8" {
+		if execReport.OrdStatus == "8" && execReport.Text != "order not open" {
 			err = fmt.Errorf("Cancel Order Rejected: %s", execReport.Text)
 			return
 		}
@@ -979,42 +1017,6 @@ func (e CoinbaseFIXclient) ModifyOrder() (err error) {
 	// TODO:
 
 	return
-}
-
-type CoinbaseFIXorderLIMIT struct {
-	// User defined order ID
-	ClientID string
-	// Example: "ETH-USD"
-	Symbol string
-	// Enum: OrderSide_BUY or OrderSide_SELL
-	Side  Side
-	Price string
-	Qty   string
-	// OPTIONAL Enum: OrderTimeInForce_GOOD_TILL_CANCEL (default), OrderTimeInForce_IMMEDIATE_OR_CANCEL, OrderTimeInForce_FILL_OR_KILL, or OrderTimeInForce_POST_ONLY
-	TimeInForce enum.TimeInForce
-	// OPTIONAL Enum: OrderTimeInForce_DECREMENT_AND_CANCEL (default), OrderTimeInForce_CANCEL_RESTING, OrderTimeInForce_CANCEL_INCOMING, or OrderTimeInForce_CANCEL_BOTH
-	SelfTradePrevention enum.SelfTradePrevention
-}
-
-type CoinbaseFIXorderMARKET_QTY struct {
-	// User defined order ID
-	ClientID string
-	// Example: "ETH-USD"
-	Symbol string
-	// Enum: OrderSide_BUY or OrderSide_SELL
-	Side Side
-	Qty  string
-}
-
-type CoinbaseFIXorderMARKET_CASH struct {
-	// User defined order ID
-	ClientID string
-	// Example: "ETH-USD"
-	Symbol string
-	// Enum: OrderSide_BUY or OrderSide_SELL
-	Side Side
-	// Order size in quote units (e.g., USD) (Market order only)
-	CashOrderQty string
 }
 
 type ClientIDandSymbol struct {

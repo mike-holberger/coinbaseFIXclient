@@ -88,6 +88,17 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	_, err = cbFIXclient.OrderCancelByOrderID(OrderIDandSymbol{
+		OrderID: "509e971a-1e70-11ed-861d-0242ac120055",
+		Symbol:  "ETH-USD",
+	}, true, ctx)
+	if err != nil {
+		log.Error().Err(err).Msgf("Cancel Single Order Error")
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	execReport, err = cbFIXclient.NewOrderSingleLIMIT(CoinbaseFIXorderLIMIT{
 		ClientID: "509e971a-1e70-11ed-861d-0242ac120003",
 		Symbol:   "ETH-USD",
