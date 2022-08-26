@@ -1006,8 +1006,163 @@ func (e CoinbaseFIXclient) OrderCancelBatchByClientID(orders []ClientIDandSymbol
 	return
 }
 
-func (e CoinbaseFIXclient) OrderCancelBatchByOrderID(orders []OrderIDandSymbol) (err error) {
-	// TODO:
+func (e CoinbaseFIXclient) OrderCancelBatchByOrderID(orders []OrderIDandSymbol, awaitExecReports bool, ctx context.Context) (execReports []ExecutionReport, err error) {
+	batchID := uuid.NewString()
+
+	cob := fix42ordercancelbatch.New(field.NewBatchID(batchID))
+	cob.SetString(73, fmt.Sprintf("%d", len(orders)))
+
+	group := fix42ordercancelbatch.NewNoOrdersRepeatingGroup()
+
+	for _, ord := range orders {
+		g := group.Add()
+		g.Set(field.NewOrderID(ord.OrderID))
+		g.SetString(55, strings.ToUpper(ord.Symbol))
+	}
+
+	cob.SetGroup(group)
+
+	msg := cob.ToMessage()
+	msg.Header.Set(field.NewSenderCompID(e.key))
+	msg.Header.Set(field.NewTargetCompID(cbtarget))
+
+	if !awaitExecReports {
+		err = quickfix.Send(msg)
+		return
+	}
+
+	batchRejectChan := make(chan ExecutionReport, 1)
+	chans := []chan ExecutionReport{}
+
+	// Add batch reject channel
+	e.execReports.mu.Lock()
+	e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+		callbackID: batchID,
+		callbackCh: batchRejectChan,
+	})
+
+	// Add order execReport callback channels
+	for _, order := range orders {
+		callbackChan := make(chan ExecutionReport, 1)
+		chans = append(chans, callbackChan)
+
+		e.execReports.reportChans = append(e.execReports.reportChans, execReportChan{
+			callbackID: order.OrderID,
+			callbackCh: callbackChan,
+		})
+	}
+	e.execReports.mu.Unlock()
+
+	// Send Msg
+	err = quickfix.Send(msg)
+	if err != nil {
+		// Clean up callback channels
+		e.execReports.mu.Lock()
+	ERR_ORDERS:
+		for _, ord := range orders {
+			for i, reportChans := range e.execReports.reportChans {
+				// Remove reject chan
+				if reportChans.callbackID == batchID {
+					close(reportChans.callbackCh)
+
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					continue
+				}
+
+				// Remove ExecReport chans
+				if reportChans.callbackID == ord.OrderID {
+					close(reportChans.callbackCh)
+
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					continue ERR_ORDERS
+				}
+			}
+		}
+		e.execReports.mu.Unlock()
+
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Wait for ExecReports
+	for _, callbackChan := range chans {
+		select {
+		// Batch successful - collect reports and remove reject channel
+		case report := <-callbackChan:
+			// Remove reject chan
+			e.execReports.mu.Lock()
+			for i, reportChans := range e.execReports.reportChans {
+				if reportChans.callbackID == batchID {
+					// Remove from callback chans
+					e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+					e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+					continue
+				}
+			}
+			e.execReports.mu.Unlock()
+
+			execReports = append(execReports, report)
+
+		// Batch rejected - collect reject report and remove execReport channels
+		case rejct := <-batchRejectChan:
+			e.execReports.mu.Lock()
+		REJECT_ORDERS:
+			for _, ord := range orders {
+				for i, reportChans := range e.execReports.reportChans {
+					if reportChans.callbackID == ord.OrderID {
+						// Remove from callback chans
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						continue REJECT_ORDERS
+					}
+				}
+			}
+			e.execReports.mu.Unlock()
+
+			execReports = append(execReports, rejct)
+			err = fmt.Errorf(rejct.Text)
+			return
+
+		// Batch Context Timeout - close and remove all callback channels
+		case <-ctx.Done():
+			e.execReports.mu.Lock()
+		CTX_ORDERS:
+			for _, ord := range orders {
+				for i, reportChans := range e.execReports.reportChans {
+					// Remove reject chan
+					if reportChans.callbackID == batchID {
+						close(reportChans.callbackCh)
+
+						// Remove from callback chans
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						continue
+					}
+
+					// Remove ExecReport chans
+					if reportChans.callbackID == ord.OrderID {
+						close(reportChans.callbackCh)
+
+						// Remove from callback chans
+						e.execReports.reportChans[i] = e.execReports.reportChans[len(e.execReports.reportChans)-1]
+						e.execReports.reportChans = e.execReports.reportChans[:len(e.execReports.reportChans)-1]
+						continue CTX_ORDERS
+					}
+				}
+			}
+			e.execReports.mu.Unlock()
+
+			err = fmt.Errorf("Batch Order Context Timout")
+			return
+		}
+	}
 
 	return
 }
