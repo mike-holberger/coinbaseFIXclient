@@ -3,7 +3,6 @@ module coinbaseFIXclient
 go 1.19
 
 require (
-	github.com/google/uuid v1.3.0
 	github.com/quickfixgo/quickfix v0.6.1-0.20210618140103-31f5ebe90229
 	github.com/rs/zerolog v1.27.0
 	github.com/shopspring/decimal v1.3.1

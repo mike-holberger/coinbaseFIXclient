@@ -42,7 +42,7 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err := cbFIXclient.NewOrderSingle(CoinbaseOrderFIX{
+	execReport, err := cbFIXclient.NewOrderSingle(CoinbaseFIXorder{
 		ClientID:  "509e971a-1e70-11ed-861d-0242ac120001",
 		Symbol:    "ETH-USD",
 		Side:      Side_BUY,
@@ -56,7 +56,7 @@ func main() {
 		log.Info().Interface("ExecReport", execReport).Send()
 	}
 
-	execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseOrderFIX{
+	execReports, err := cbFIXclient.NewOrdersBatch("BATCH-TEST", []CoinbaseFIXorder{
 		{
 			ClientID:  "509e971a-1e70-11ed-861d-0242ac120002",
 			Symbol:    "ETH-USD",
@@ -80,7 +80,10 @@ func main() {
 		log.Info().Interface("ExecReports", execReports).Send()
 	}
 
-	err = cbFIXclient.OrderCancel("509e971a-1e70-11ed-861d-0242ac120055", "ETH-USD")
+	err = cbFIXclient.OrderCancelByClientID(ClientIDandSymbol{
+		ClientID: "509e971a-1e70-11ed-861d-0242ac120055",
+		Symbol:   "ETH-USD",
+	})
 	if err != nil {
 		log.Error().Err(err).Msgf("Cancel Single Order Error")
 	}
@@ -88,7 +91,7 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err = cbFIXclient.NewOrderSingle(CoinbaseOrderFIX{
+	execReport, err = cbFIXclient.NewOrderSingle(CoinbaseFIXorder{
 		ClientID:  "509e971a-1e70-11ed-861d-0242ac120003",
 		Symbol:    "ETH-USD",
 		Side:      Side_BUY,
@@ -105,7 +108,10 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err = cbFIXclient.OrderStatus("509e971a-1e70-11ed-861d-0242ac120003", "ETH-USD", ctx)
+	execReport, err = cbFIXclient.OrderStatusByClientID(ClientIDandSymbol{
+		ClientID: "509e971a-1e70-11ed-861d-0242ac120003",
+		Symbol:   "ETH-USD",
+	}, ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("Order Status Error")
 	} else {
@@ -114,7 +120,7 @@ func main() {
 
 	time.Sleep(2 * time.Second)
 
-	err = cbFIXclient.OrderCancelBatch("CANCEL_BATCH1", []CoinbaseOrderFIX{
+	err = cbFIXclient.OrderCancelBatch("CANCEL_BATCH1", []ClientIDandSymbol{
 		{
 			ClientID: "509e971a-1e70-11ed-861d-0242ac120001",
 			Symbol:   "ETH-USD",
