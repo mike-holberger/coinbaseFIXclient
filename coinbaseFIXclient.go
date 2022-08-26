@@ -262,15 +262,15 @@ func (e CoinbaseFIXclient) NewOrderSingle(order CoinbaseOrderFIX, waitForExecRep
 }
 
 // Fastest way to cancel an order. Must include ClientID, Symbol, and Side
-func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
+func (e CoinbaseFIXclient) OrderCancel(clientID string, symbol string) (err error) {
 	cancelID := uuid.New().String()
 
 	oc := fix42ordercancel.New(
-		field.NewOrigClOrdID(order.ClientID),
+		field.NewOrigClOrdID(clientID),
 		field.NewClOrdID(cancelID),
-		field.NewSymbol(order.Symbol),
-		field.NewSide(enum.Side(order.Side)),
-		field.NewTransactTime(time.Now().UTC()),
+		field.NewSymbol(symbol),
+		field.NewSide(enum.Side_SELL),           // THIS FIELD IGNORED BY SERVER
+		field.NewTransactTime(time.Now().UTC()), // THIS FIELD IGNORED BY SERVER
 	)
 
 	// Finalize and send
@@ -282,6 +282,12 @@ func (e CoinbaseFIXclient) OrderCancel(order CoinbaseOrderFIX) (err error) {
 	err = quickfix.Send(msg)
 	return
 	//}
+
+	///
+	/// COINBASE'S SUCCESSFULL CANCEL ORDER EXEC REPORTS DO NOT RETURN THE CLIENT ID FIELD...?
+	/// (BUT REJECTED CANCEL REPORTS DO)
+	/// NOT NECESSARY TO AWAIT REPORT. ASSUME SUCCESSFUL CANCEL, OR ORDER DOESNT EXIST
+	///
 
 	// // Create callback channel and Wait for ExecReport
 	// callbackChan := make(chan ExecutionReport, 1)
@@ -334,7 +340,7 @@ func (e CoinbaseFIXclient) OrderStatus(clientID string, symbol string, ctx conte
 	os := fix42orderstatus.New(
 		field.NewClOrdID(clientID),
 		field.NewSymbol(strings.ToUpper(symbol)),
-		field.NewSide(enum.Side_SELL),
+		field.NewSide(enum.Side_SELL), // THIS FIELD IGNORED BY SERVER
 	)
 
 	// Finalize and send
@@ -620,6 +626,10 @@ func getMsgType(msgType string) string {
 		return "Logon"
 	case "D":
 		return "Order-Single"
+	case "F":
+		return "Order-Cancel"
+	case "H":
+		return "Order-Status"
 	case "8":
 		return "ExecReport"
 	case "9":
