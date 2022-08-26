@@ -42,13 +42,12 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err := cbFIXclient.NewOrderSingle(CoinbaseFIXorder{
-		ClientID:  "509e971a-1e70-11ed-861d-0242ac120001",
-		Symbol:    "ETH-USD",
-		Side:      Side_BUY,
-		OrderType: OrdType_LIMIT,
-		Price:     "1602",
-		Qty:       "0.02",
+	execReport, err := cbFIXclient.NewOrderSingleLIMIT(CoinbaseFIXorderLIMIT{
+		ClientID: "509e971a-1e70-11ed-861d-0242ac120001",
+		Symbol:   "ETH-USD",
+		Side:     Side_BUY,
+		Price:    "1602",
+		Qty:      "0.02",
 	}, true, ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("NewOrderSingle Error")
@@ -91,13 +90,12 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	execReport, err = cbFIXclient.NewOrderSingle(CoinbaseFIXorder{
-		ClientID:  "509e971a-1e70-11ed-861d-0242ac120003",
-		Symbol:    "ETH-USD",
-		Side:      Side_BUY,
-		OrderType: OrdType_LIMIT,
-		Price:     "1603",
-		Qty:       "0.02",
+	execReport, err = cbFIXclient.NewOrderSingleLIMIT(CoinbaseFIXorderLIMIT{
+		ClientID: "509e971a-1e70-11ed-861d-0242ac120003",
+		Symbol:   "ETH-USD",
+		Side:     Side_BUY,
+		Price:    "1603",
+		Qty:      "0.02",
 	}, true, ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("NewOrderSingle Error")
